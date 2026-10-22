@@ -45,15 +45,19 @@ function downloadFile(url, dest) {
 function postJsonToAppsScript(payload) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(payload);
-    const req = https.request(APPS_SCRIPT_URL, {
+    const parsed = new URL(APPS_SCRIPT_URL);
+    const options = {
+      hostname: parsed.hostname,
+      path: parsed.pathname + parsed.search,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(data)
       }
-    }, res => {
+    };
+
+    const req = https.request(options, res => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        // Handle Google Apps Script 302 redirect
         https.get(res.headers.location, r2 => {
           let body = '';
           r2.on('data', c => body += c);
