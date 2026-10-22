@@ -1,0 +1,39 @@
+name: Daily Facebook Scheduler & Cleaner (Phase 3)
+
+on:
+  schedule:
+    # 05:00 AM UTC (10:30 AM IST / 01:00 AM EDT) - runs ~2 hours after Ingest, allowing Gemini Agent to transform
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+
+jobs:
+  schedule-and-clean:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Facebook Scheduler & Google Drive Cleaner
+        env:
+          APPS_SCRIPT_URL: ${{ secrets.APPS_SCRIPT_URL }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+        run: node scripts/schedule_posts.js
+
+      - name: Commit & Push state update
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add scheduled_posts_state.json || true
+          git commit -m "chore: update scheduled posts state [skip ci]" || true
+          git push || true

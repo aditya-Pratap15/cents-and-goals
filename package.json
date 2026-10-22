@@ -1,0 +1,14 @@
+{
+  "name": "cents-and-goals",
+  "version": "1.0.0",
+  "description": "Automated Financial Wisdom Scraper, Transformer, and Facebook Publisher",
+  "main": "scripts/fetch_jeff_rose.js",
+  "scripts": {
+    "fetch": "node scripts/fetch_jeff_rose.js",
+    "schedule": "node scripts/schedule_posts.js",
+    "sync-comments": "node scripts/sync_comments.js"
+  },
+  "dependencies": {
+    "puppeteer": "^22.6.0"
+  }
+}

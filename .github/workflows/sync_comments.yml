@@ -1,0 +1,33 @@
+name: Sync Author Comments
+
+on:
+  schedule:
+    # Runs every 2 hours to check if any scheduled post has gone live and post author comments
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+jobs:
+  sync-comments:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Sync Comments
+        env:
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+        run: node scripts/sync_comments.js
+
+      - name: Commit & Push state update
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add scheduled_posts_state.json || true
+          git commit -m "chore: update comment sync state [skip ci]" || true
+          git push || true
