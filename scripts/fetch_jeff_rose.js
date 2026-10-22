@@ -286,8 +286,14 @@ async function scrapeJeffRosePosts() {
     }
   }
 
-  // 2. Add today_raw_posts.json as base64
-  const jsonB64 = Buffer.from(JSON.stringify(scrapedPosts, null, 2), 'utf8').toString('base64');
+  // 2. Add captions.json (and today_raw_posts.json) as base64
+  const jsonContent = JSON.stringify(scrapedPosts, null, 2);
+  const jsonB64 = Buffer.from(jsonContent, 'utf8').toString('base64');
+  filesPayload.push({
+    filename: 'captions.json',
+    mimeType: 'application/json',
+    base64: jsonB64
+  });
   filesPayload.push({
     filename: 'today_raw_posts.json',
     mimeType: 'application/json',

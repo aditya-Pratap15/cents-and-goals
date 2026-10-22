@@ -196,7 +196,7 @@ async function runScheduler() {
   const files = driveData.files || [];
 
   if (!metadata) {
-    // If metadata was not parsed automatically, look for today_transformed.json or today_raw_posts.json
+    // If metadata was not parsed automatically, look for JSON files
     const metaFile = files.find(f => f.name.endsWith('.json'));
     if (metaFile) {
       console.log(`Fetching metadata JSON from file ID: ${metaFile.id} (${metaFile.name})`);
@@ -208,13 +208,21 @@ async function runScheduler() {
     }
   }
 
-  if (!metadata || !metadata.posts || metadata.posts.length === 0) {
+  let posts = [];
+  if (Array.isArray(metadata)) {
+    posts = metadata;
+  } else if (metadata && Array.isArray(metadata.posts)) {
+    posts = metadata.posts;
+  } else if (metadata && Array.isArray(metadata.data)) {
+    posts = metadata.data;
+  }
+
+  if (posts.length === 0) {
     console.log('⚠️ No transformed posts found in "after" subfolder to schedule.');
     console.log('Please ensure Phase 2 (Gemini Transformation) has completed and uploaded files.');
     return;
   }
 
-  const posts = metadata.posts;
   console.log(`Found ${posts.length} posts to schedule.\n`);
 
   const scheduledResults = [];
