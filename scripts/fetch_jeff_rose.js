@@ -123,17 +123,19 @@ async function scrapeJeffRosePosts() {
   await new Promise(r => setTimeout(r, 2000));
 
   // Extract distinct photo permalinks
+  // Exclude album/profile/cover header photos (such as 782814716377583)
   const rawLinks = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('a'))
       .map(a => a.href)
-      .filter(h => h.includes('/photo.php') || h.includes('/photo/?fbid=') || h.includes('fbid='));
+      .filter(h => h.includes('/photo.php') || h.includes('/photo/?fbid=') || (h.includes('/photo') && h.includes('fbid=')));
   });
 
   const distinctPhotoLinks = [];
   const seenFbids = new Set();
   for (const link of rawLinks) {
     const match = link.match(/fbid=(\d+)/);
-    if (match && !seenFbids.has(match[1])) {
+    // Ignore cover/profile header photo (782814716377583) and non-photo links
+    if (match && match[1] !== '782814716377583' && !seenFbids.has(match[1])) {
       seenFbids.add(match[1]);
       distinctPhotoLinks.push(link);
     }
@@ -162,6 +164,24 @@ async function scrapeJeffRosePosts() {
     try {
       await photoPage.goto(photoUrl, { waitUntil: 'networkidle2', timeout: 35000 });
 
+      // Dismiss login popup if present
+      try {
+        await photoPage.evaluate(() => {
+          const closeBtn = document.querySelector('div[aria-label="Close"], [aria-label="Decline optional cookies"]');
+          if (closeBtn) closeBtn.click();
+        });
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (e) {}
+
+      // Click "See more" text expander
+      try {
+        await photoPage.evaluate(() => {
+          const seeMores = Array.from(document.querySelectorAll('div[role="button"], span')).filter(el => (el.innerText || '').trim().toLowerCase() === 'see more');
+          seeMores.forEach(el => el.click());
+        });
+        await new Promise(r => setTimeout(r, 1000));
+      } catch (e) {}
+
       const details = await photoPage.evaluate(() => {
         // 1. High-Res Image
         const imgs = Array.from(document.querySelectorAll('img'))
@@ -170,46 +190,52 @@ async function scrapeJeffRosePosts() {
             width: img.naturalWidth || img.width || 0,
             height: img.naturalHeight || img.height || 0
           }))
-          .filter(img => img.src.includes('fbcdn.net') && (img.width > 400 || img.height > 400));
+          .filter(img => img.src.includes('fbcdn.net') && (img.width > 300 || img.height > 300));
 
         imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
         const bestImage = imgs[0] ? imgs[0].src : null;
 
         // 2. Post Caption
-        // Look for the main description container
+        // Extract substantive text candidate blocks
         const textElements = Array.from(document.querySelectorAll('div[dir="auto"], span[dir="auto"]'))
-          .map(el => el.innerText ? el.innerText.trim() : '')
-          .filter(t => t.length > 40);
+          .map(el => (el.innerText || '').trim())
+          .filter(t => t.length > 25);
 
-        // Filter out navigation/UI boilerplate
-        const cleanTextCandidates = textElements.filter(t => {
-          return !t.startsWith('View more comments') &&
+        // Filter out boilerplate/navigation
+        const cleanCandidates = textElements.filter(t => {
+          return !t.startsWith('Log in') &&
+                 !t.startsWith('See more on Facebook') &&
+                 !t.startsWith('Create new account') &&
+                 !t.startsWith('Forgot password') &&
+                 !t.startsWith('View more comments') &&
                  !t.startsWith('Write a comment') &&
+                 !t.includes('All reactions:') &&
                  !t.includes('Like\nComment') &&
-                 !t.includes('All reactions:');
+                 !t.match(/^\d+[hmdw]$/);
         });
 
-        // The longest substantive text block is usually the author's caption
-        cleanTextCandidates.sort((a, b) => b.length - a.length);
-        const caption = cleanTextCandidates[0] || '';
+        // Longest candidate is the author's caption
+        cleanCandidates.sort((a, b) => b.length - a.length);
+        const caption = cleanCandidates[0] || '';
 
-        // 3. Creator Comment (Comment by Good Financial Cents or Jeff Rose)
+        // 3. Creator Comment (Comment by Good Financial Cents or marked Author)
         let authorComment = null;
-        const commentBlocks = Array.from(document.querySelectorAll('div[role="article"], div[aria-label*="Comment"]'));
+        const commentBlocks = Array.from(document.querySelectorAll('div[role="article"]'));
         for (const cb of commentBlocks) {
           const text = cb.innerText || '';
-          if (text.includes('Good Financial Cents') || text.includes('Jeff Rose')) {
-            // Found author comment
-            const commentLines = text.split('\n').filter(l => l.trim().length > 10);
-            if (commentLines.length > 1) {
-              authorComment = commentLines.slice(1).join('\n').trim();
+          if (text.includes('Good Financial Cents') || text.includes('Author')) {
+            const commentLines = text.split('\n')
+              .map(l => l.trim())
+              .filter(l => l.length > 10 && l !== 'Good Financial Cents' && l !== 'Author');
+            if (commentLines.length > 0) {
+              authorComment = commentLines[0];
               break;
             }
           }
         }
 
         // 4. Timestamp text
-        const timeEl = document.querySelector('abbr, span[id*="jsc_"] a, a[role="link"] span');
+        const timeEl = document.querySelector('abbr, a[role="link"] span');
         const timeText = timeEl ? timeEl.innerText.trim() : new Date().toISOString();
 
         return {
