@@ -182,12 +182,28 @@ async function scrapeJeffRosePosts() {
         await new Promise(r => setTimeout(r, 1000));
       } catch (e) {}
 
-      // Look for the underlying post permalink (e.g. /GoodFinancialCents/posts/...)
+      // Step A: Extract high-res image from photo theater view BEFORE navigating
+      let highResImgUrl = await photoPage.evaluate(() => {
+        const imgs = Array.from(document.querySelectorAll('img'))
+          .map(img => ({
+            src: img.src,
+            width: img.naturalWidth || img.width || 0,
+            height: img.naturalHeight || img.height || 0
+          }))
+          .filter(img => (img.src.includes('fbcdn.net') || img.src.includes('scontent')) && 
+                         !img.src.includes('emoji.php') && 
+                         !img.src.includes('/rsrc.php/') &&
+                         (img.width > 250 || img.height > 250));
+        imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+        return imgs[0] ? imgs[0].src : null;
+      });
+
+      // Step B: Look for the underlying post permalink (e.g. /GoodFinancialCents/posts/...)
       const postPermalink = await photoPage.evaluate(() => {
         const links = Array.from(document.querySelectorAll('a'))
           .map(a => a.href)
-          .filter(h => h.includes('/GoodFinancialCents/posts/') || h.includes('/permalink/'));
-        return links[0] || null;
+          .filter(h => h.includes('/GoodFinancialCents/posts/'));
+        return links[0] ? links[0].split('?')[0] : null;
       });
 
       let caption = '';
@@ -195,13 +211,14 @@ async function scrapeJeffRosePosts() {
       let timeText = 'Recent';
 
       if (postPermalink) {
-        console.log(`     🔗 Found post permalink: ${postPermalink}`);
-        await photoPage.goto(postPermalink, { waitUntil: 'networkidle2', timeout: 25000 });
+        console.log(`     🔗 Following post permalink: ${postPermalink}`);
+        await photoPage.goto(postPermalink, { waitUntil: 'networkidle2', timeout: 30000 });
 
         // Click See more on post page
         try {
           await photoPage.evaluate(() => {
-            const seeMores = Array.from(document.querySelectorAll('div[role="button"], span')).filter(el => (el.innerText || '').trim().toLowerCase() === 'see more');
+            const seeMores = Array.from(document.querySelectorAll('div[role="button"], span'))
+              .filter(el => (el.innerText || '').trim().toLowerCase() === 'see more');
             seeMores.forEach(el => el.click());
           });
           await new Promise(r => setTimeout(r, 800));
@@ -211,29 +228,42 @@ async function scrapeJeffRosePosts() {
           // Extract text blocks
           const textDivs = Array.from(document.querySelectorAll('div[dir="auto"]'))
             .map(d => (d.innerText || '').trim())
-            .filter(t => t.length > 35 && !t.includes('All reactions:') && !t.includes('Write a comment'));
+            .filter(t => t.length > 40 && 
+                         !t.includes('All reactions:') && 
+                         !t.includes('Write a comment') &&
+                         !t.includes('Most relevant') &&
+                         !t.includes('Spanish') && 
+                         !t.startsWith('Log in'));
 
-          textDivs.sort((a, b) => b.length - a.length);
+          // The main post caption is the first substantive text block
+          const mainCaption = textDivs[0] || '';
 
-          // Extract author comment
+          // Extract author comment (comments made by Good Financial Cents / Author)
           let comment = null;
-          const commentBlocks = Array.from(document.querySelectorAll('div[role="article"]'));
+          const commentBlocks = Array.from(document.querySelectorAll('div[role="article"]'))
+            .filter(cb => {
+              const aria = (cb.getAttribute('aria-label') || '').toLowerCase();
+              return aria.includes('comment by') && (aria.includes('good financial cents') || cb.innerText.includes('Author'));
+            });
+
           for (const cb of commentBlocks) {
-            const txt = cb.innerText || '';
-            if (txt.includes('Good Financial Cents') || txt.includes('Author')) {
-              const lines = txt.split('\n')
-                .map(l => l.trim())
-                .filter(l => l.length > 10 && l !== 'Good Financial Cents' && l !== 'Author');
-              if (lines.length > 0) {
-                comment = lines[0];
-                break;
-              }
+            const textNodes = Array.from(cb.querySelectorAll('div[dir="auto"]'))
+              .map(n => (n.innerText || '').trim())
+              .filter(t => t.length > 5 && 
+                           t !== 'Author' && 
+                           t !== 'Good Financial Cents' && 
+                           !t.match(/^\d+[hmdw]$/) && 
+                           !t.includes('ago') &&
+                           t !== mainCaption);
+            if (textNodes.length > 0) {
+              comment = textNodes[0];
+              break;
             }
           }
 
           const timeEl = document.querySelector('abbr, a[role="link"] span');
           return {
-            caption: textDivs[0] || '',
+            caption: mainCaption,
             comment: comment,
             time: timeEl ? timeEl.innerText.trim() : 'Recent'
           };
@@ -242,21 +272,25 @@ async function scrapeJeffRosePosts() {
         caption = postData.caption;
         authorComment = postData.comment;
         timeText = postData.time;
+
+        // Fallback: If image wasn't found on photo theater page, extract from post page
+        if (!highResImgUrl) {
+          highResImgUrl = await photoPage.evaluate(() => {
+            const imgs = Array.from(document.querySelectorAll('img[src*="scontent"], img[src*="fbcdn"]'))
+              .map(img => ({
+                src: img.src,
+                width: img.naturalWidth || img.width || 0,
+                height: img.naturalHeight || img.height || 0
+              }))
+              .filter(img => !img.src.includes('emoji.php') && !img.src.includes('/rsrc.php/') && (img.width > 250 || img.height > 250));
+            imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+            return imgs[0] ? imgs[0].src : null;
+          });
+        }
       }
 
-      // High-res photo from photo page
       const details = {
-        imageUrl: await photoPage.evaluate(() => {
-          const imgs = Array.from(document.querySelectorAll('img'))
-            .map(img => ({
-              src: img.src,
-              width: img.naturalWidth || img.width || 0,
-              height: img.naturalHeight || img.height || 0
-            }))
-            .filter(img => (img.src.includes('fbcdn.net') || img.src.includes('scontent')) && (img.width > 300 || img.height > 300));
-          imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
-          return imgs[0] ? imgs[0].src : null;
-        }),
+        imageUrl: highResImgUrl,
         caption: caption,
         authorComment: authorComment,
         timeText: timeText
@@ -268,7 +302,7 @@ async function scrapeJeffRosePosts() {
         continue;
       }
 
-      const postSlug = slugify(details.caption.slice(0, 40));
+      const postSlug = slugify(details.caption.slice(0, 40)) || 'photo';
       const filename = `post_0${i + 1}_${postSlug}.jpg`;
       const localFilePath = path.join(DOWNLOADS_DIR, filename);
 
