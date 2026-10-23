@@ -182,86 +182,85 @@ async function scrapeJeffRosePosts() {
         await new Promise(r => setTimeout(r, 1000));
       } catch (e) {}
 
-      const details = await photoPage.evaluate(() => {
-        // 1. High-Res Image
-        const imgs = Array.from(document.querySelectorAll('img'))
-          .map(img => ({
-            src: img.src,
-            width: img.naturalWidth || img.width || 0,
-            height: img.naturalHeight || img.height || 0
-          }))
-          .filter(img => img.src.includes('fbcdn.net') && (img.width > 300 || img.height > 300));
+      // Look for the underlying post permalink (e.g. /GoodFinancialCents/posts/...)
+      const postPermalink = await photoPage.evaluate(() => {
+        const links = Array.from(document.querySelectorAll('a'))
+          .map(a => a.href)
+          .filter(h => h.includes('/GoodFinancialCents/posts/') || h.includes('/permalink/'));
+        return links[0] || null;
+      });
 
-        imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
-        const bestImage = imgs[0] ? imgs[0].src : null;
+      let caption = '';
+      let authorComment = null;
+      let timeText = 'Recent';
 
-        // 2. Post Caption
-        // Target main post content area
-        const postContainers = Array.from(document.querySelectorAll('div[role="main"], div[role="article"], div[data-pagelet*="Photo"]'));
-        let candidateTexts = [];
+      if (postPermalink) {
+        console.log(`     🔗 Found post permalink: ${postPermalink}`);
+        await photoPage.goto(postPermalink, { waitUntil: 'networkidle2', timeout: 25000 });
 
-        if (postContainers.length > 0) {
-          for (const pc of postContainers) {
-            const divs = Array.from(pc.querySelectorAll('div[dir="auto"], span[dir="auto"]'));
-            for (const d of divs) {
-              const txt = (d.innerText || '').trim();
-              if (txt.length > 35) candidateTexts.push(txt);
+        // Click See more on post page
+        try {
+          await photoPage.evaluate(() => {
+            const seeMores = Array.from(document.querySelectorAll('div[role="button"], span')).filter(el => (el.innerText || '').trim().toLowerCase() === 'see more');
+            seeMores.forEach(el => el.click());
+          });
+          await new Promise(r => setTimeout(r, 800));
+        } catch (e) {}
+
+        const postData = await photoPage.evaluate(() => {
+          // Extract text blocks
+          const textDivs = Array.from(document.querySelectorAll('div[dir="auto"]'))
+            .map(d => (d.innerText || '').trim())
+            .filter(t => t.length > 35 && !t.includes('All reactions:') && !t.includes('Write a comment'));
+
+          textDivs.sort((a, b) => b.length - a.length);
+
+          // Extract author comment
+          let comment = null;
+          const commentBlocks = Array.from(document.querySelectorAll('div[role="article"]'));
+          for (const cb of commentBlocks) {
+            const txt = cb.innerText || '';
+            if (txt.includes('Good Financial Cents') || txt.includes('Author')) {
+              const lines = txt.split('\n')
+                .map(l => l.trim())
+                .filter(l => l.length > 10 && l !== 'Good Financial Cents' && l !== 'Author');
+              if (lines.length > 0) {
+                comment = lines[0];
+                break;
+              }
             }
           }
-        }
 
-        if (candidateTexts.length === 0) {
-          candidateTexts = Array.from(document.querySelectorAll('div[dir="auto"], span[dir="auto"]'))
-            .map(el => (el.innerText || '').trim())
-            .filter(t => t.length > 35);
-        }
-
-        // Filter out footer links, boilerplate, and login dialog text
-        const cleanCandidates = candidateTexts.filter(t => {
-          return !t.startsWith('Log in') &&
-                 !t.startsWith('See more on Facebook') &&
-                 !t.startsWith('Create new account') &&
-                 !t.startsWith('Forgot password') &&
-                 !t.startsWith('View more comments') &&
-                 !t.startsWith('Write a comment') &&
-                 !t.includes('Contact Uploading') &&
-                 !t.includes('Meta ©') &&
-                 !t.includes('All reactions:') &&
-                 !t.includes('Like\nComment') &&
-                 !t.match(/^\d+[hmdw]$/);
+          const timeEl = document.querySelector('abbr, a[role="link"] span');
+          return {
+            caption: textDivs[0] || '',
+            comment: comment,
+            time: timeEl ? timeEl.innerText.trim() : 'Recent'
+          };
         });
 
-        // Longest candidate in the post area is the true caption
-        cleanCandidates.sort((a, b) => b.length - a.length);
-        const caption = cleanCandidates[0] || '';
+        caption = postData.caption;
+        authorComment = postData.comment;
+        timeText = postData.time;
+      }
 
-        // 3. Creator Comment (Comment by Good Financial Cents or marked Author)
-        let authorComment = null;
-        const commentBlocks = Array.from(document.querySelectorAll('div[role="article"]'));
-        for (const cb of commentBlocks) {
-          const text = cb.innerText || '';
-          if (text.includes('Good Financial Cents') || text.includes('Author')) {
-            const commentLines = text.split('\n')
-              .map(l => l.trim())
-              .filter(l => l.length > 10 && l !== 'Good Financial Cents' && l !== 'Author');
-            if (commentLines.length > 0) {
-              authorComment = commentLines[0];
-              break;
-            }
-          }
-        }
-
-        // 4. Timestamp text
-        const timeEl = document.querySelector('abbr, a[role="link"] span');
-        const timeText = timeEl ? timeEl.innerText.trim() : new Date().toISOString();
-
-        return {
-          imageUrl: bestImage,
-          caption: caption,
-          authorComment: authorComment,
-          timeText: timeText
-        };
-      });
+      // High-res photo from photo page
+      const details = {
+        imageUrl: await photoPage.evaluate(() => {
+          const imgs = Array.from(document.querySelectorAll('img'))
+            .map(img => ({
+              src: img.src,
+              width: img.naturalWidth || img.width || 0,
+              height: img.naturalHeight || img.height || 0
+            }))
+            .filter(img => (img.src.includes('fbcdn.net') || img.src.includes('scontent')) && (img.width > 300 || img.height > 300));
+          imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
+          return imgs[0] ? imgs[0].src : null;
+        }),
+        caption: caption,
+        authorComment: authorComment,
+        timeText: timeText
+      };
 
       if (!details.imageUrl) {
         console.warn(`  ⚠️ Could not find high-res image for post #${i + 1}, skipping.`);
