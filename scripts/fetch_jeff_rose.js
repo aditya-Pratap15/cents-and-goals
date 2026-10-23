@@ -182,6 +182,9 @@ async function scrapeJeffRosePosts() {
         await new Promise(r => setTimeout(r, 1000));
       } catch (e) {}
 
+      // Wait up to 5s for images to render
+      await photoPage.waitForSelector('img[src*="scontent"], img[src*="fbcdn"]', { timeout: 5000 }).catch(() => {});
+
       // Step A: Extract high-res image from photo theater view BEFORE navigating
       let highResImgUrl = await photoPage.evaluate(() => {
         const imgs = Array.from(document.querySelectorAll('img'))
@@ -193,7 +196,9 @@ async function scrapeJeffRosePosts() {
           .filter(img => (img.src.includes('fbcdn.net') || img.src.includes('scontent')) && 
                          !img.src.includes('emoji.php') && 
                          !img.src.includes('/rsrc.php/') &&
-                         (img.width > 250 || img.height > 250));
+                         !img.src.includes('s50x50') &&
+                         !img.src.includes('s100x100') &&
+                         (img.width > 200 || img.height > 200 || img.width === 0));
         imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
         return imgs[0] ? imgs[0].src : null;
       });
@@ -282,7 +287,11 @@ async function scrapeJeffRosePosts() {
                 width: img.naturalWidth || img.width || 0,
                 height: img.naturalHeight || img.height || 0
               }))
-              .filter(img => !img.src.includes('emoji.php') && !img.src.includes('/rsrc.php/') && (img.width > 250 || img.height > 250));
+              .filter(img => !img.src.includes('emoji.php') && 
+                             !img.src.includes('/rsrc.php/') && 
+                             !img.src.includes('s50x50') && 
+                             !img.src.includes('s100x100') && 
+                             (img.width > 200 || img.height > 200 || img.width === 0));
             imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
             return imgs[0] ? imgs[0].src : null;
           });
@@ -298,7 +307,6 @@ async function scrapeJeffRosePosts() {
 
       if (!details.imageUrl) {
         console.warn(`  ⚠️ Could not find high-res image for post #${i + 1}, skipping.`);
-        await photoPage.close();
         continue;
       }
 
@@ -330,11 +338,15 @@ async function scrapeJeffRosePosts() {
     } catch (err) {
       console.error(`  ❌ Failed scraping post #${i + 1}:`, err.message);
     } finally {
-      await photoPage.close();
+      if (photoPage && !photoPage.isClosed()) {
+        await photoPage.close().catch(() => {});
+      }
     }
   }
 
-  await browser.close();
+  if (browser) {
+    await browser.close().catch(() => {});
+  }
 
   if (scrapedPosts.length === 0) {
     throw new Error('Failed to scrape any posts from Jeff Rose Facebook page.');
