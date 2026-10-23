@@ -2,8 +2,8 @@ name: Daily Facebook Scheduler & Cleaner (Phase 3)
 
 on:
   schedule:
-    # 05:00 AM UTC (10:30 AM IST / 01:00 AM EDT) - runs ~2 hours after Ingest, allowing Gemini Agent to transform
-    - cron: '0 5 * * *'
+    # 10:30 AM UTC (04:00 PM IST / 06:30 AM EDT) - runs after Gemini transforms at 3:00-4:00 PM IST
+    - cron: '30 10 * * *'
   workflow_dispatch:
 
 jobs:

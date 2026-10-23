@@ -2,8 +2,8 @@ name: Daily Facebook Ingestion (Phase 1)
 
 on:
   schedule:
-    # 03:00 AM UTC (08:30 AM IST / 11:00 PM EDT previous night)
-    - cron: '0 3 * * *'
+    # 09:30 AM UTC (03:00 PM IST / 05:30 AM EDT)
+    - cron: '30 9 * * *'
   workflow_dispatch:
 
 jobs:
