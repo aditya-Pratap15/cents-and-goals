@@ -122,36 +122,41 @@ async function scrapeJeffRosePosts() {
   await page.evaluate(() => window.scrollBy(0, 800));
   await new Promise(r => setTimeout(r, 2000));
 
-  // Extract distinct photo permalinks
-  // Exclude album/profile/cover header photos (such as 782814716377583)
-  const rawLinks = await page.evaluate(() => {
-    return Array.from(document.querySelectorAll('a'))
-      .map(a => a.href)
-      .filter(h => h.includes('/photo.php') || h.includes('/photo/?fbid=') || (h.includes('/photo') && h.includes('fbid=')));
+  // Extract distinct photo cards directly from /photos grid
+  const rawCards = await page.evaluate(() => {
+    return Array.from(document.querySelectorAll('a[href*="fbid="]'))
+      .map(a => {
+        const m = a.href.match(/fbid=(\d+)/);
+        const img = a.querySelector('img');
+        return {
+          fbid: m ? m[1] : null,
+          gridImg: img ? img.src : null
+        };
+      })
+      .filter(x => x.fbid && x.fbid !== '782814716377583');
   });
 
-  const distinctPhotoLinks = [];
+  const distinctCards = [];
   const seenFbids = new Set();
-  for (const link of rawLinks) {
-    const match = link.match(/fbid=(\d+)/);
-    // Ignore cover/profile header photo (782814716377583) and non-photo links
-    if (match && match[1] !== '782814716377583' && !seenFbids.has(match[1])) {
-      seenFbids.add(match[1]);
-      distinctPhotoLinks.push(link);
+  for (const card of rawCards) {
+    if (!seenFbids.has(card.fbid)) {
+      seenFbids.add(card.fbid);
+      distinctCards.push(card);
     }
   }
 
-  console.log(`📸 Identified ${distinctPhotoLinks.length} photo permalinks. Selecting top 5...`);
-  const targetLinks = distinctPhotoLinks.slice(0, 5);
+  console.log(`📸 Identified ${distinctCards.length} photo cards on grid. Selecting top 5...`);
+  const targetCards = distinctCards.slice(0, 5);
 
-  if (targetLinks.length === 0) {
+  if (targetCards.length === 0) {
     throw new Error('No photo permalinks found on target Facebook page.');
   }
 
   const scrapedPosts = [];
 
-  for (let i = 0; i < targetLinks.length; i++) {
-    const photoUrl = targetLinks[i];
+  for (let i = 0; i < targetCards.length; i++) {
+    const card = targetCards[i];
+    const photoUrl = `https://www.facebook.com/photo/?fbid=${card.fbid}`;
     console.log(`\n------------------------------------------------------`);
     console.log(`[#${i + 1}/5] Scraping post: ${photoUrl}`);
 
@@ -182,11 +187,11 @@ async function scrapeJeffRosePosts() {
         await new Promise(r => setTimeout(r, 1000));
       } catch (e) {}
 
-      // Wait up to 5s for images to render
-      await photoPage.waitForSelector('img[src*="scontent"], img[src*="fbcdn"]', { timeout: 5000 }).catch(() => {});
+      // Wait up to 4s for images to render
+      await photoPage.waitForSelector('img[src*="scontent"], img[src*="fbcdn"]', { timeout: 4000 }).catch(() => {});
 
-      // Step A: Extract high-res image from photo theater view BEFORE navigating
-      let highResImgUrl = await photoPage.evaluate(() => {
+      // Step A: Extract high-res image from modern photo view BEFORE navigating
+      let highResImgUrl = await photoPage.evaluate((fallbackUrl) => {
         const imgs = Array.from(document.querySelectorAll('img'))
           .map(img => ({
             src: img.src,
@@ -200,8 +205,8 @@ async function scrapeJeffRosePosts() {
                          !img.src.includes('s100x100') &&
                          (img.width > 200 || img.height > 200 || img.width === 0));
         imgs.sort((a, b) => (b.width * b.height) - (a.width * a.height));
-        return imgs[0] ? imgs[0].src : null;
-      });
+        return imgs[0] ? imgs[0].src : fallbackUrl;
+      }, card.gridImg);
 
       // Step B: Look for the underlying post permalink (e.g. /GoodFinancialCents/posts/...)
       const postPermalink = await photoPage.evaluate(() => {
@@ -214,6 +219,15 @@ async function scrapeJeffRosePosts() {
       let caption = '';
       let authorComment = null;
       let timeText = 'Recent';
+
+      // Caption from photo page as initial baseline
+      const photoPageCaption = await photoPage.evaluate(() => {
+        const divs = Array.from(document.querySelectorAll('div[dir="auto"]'))
+          .map(d => (d.innerText || '').trim())
+          .filter(t => t.length > 40 && !t.includes('All reactions:') && !t.includes('Write a comment') && !t.startsWith('Log in'));
+        return divs[0] || '';
+      });
+      caption = photoPageCaption;
 
       if (postPermalink) {
         console.log(`     🔗 Following post permalink: ${postPermalink}`);
@@ -299,7 +313,7 @@ async function scrapeJeffRosePosts() {
       }
 
       const details = {
-        imageUrl: highResImgUrl,
+        imageUrl: highResImgUrl || card.gridImg,
         caption: caption,
         authorComment: authorComment,
         timeText: timeText
