@@ -196,25 +196,42 @@ async function scrapeJeffRosePosts() {
         const bestImage = imgs[0] ? imgs[0].src : null;
 
         // 2. Post Caption
-        // Extract substantive text candidate blocks
-        const textElements = Array.from(document.querySelectorAll('div[dir="auto"], span[dir="auto"]'))
-          .map(el => (el.innerText || '').trim())
-          .filter(t => t.length > 25);
+        // Target main post content area
+        const postContainers = Array.from(document.querySelectorAll('div[role="main"], div[role="article"], div[data-pagelet*="Photo"]'));
+        let candidateTexts = [];
 
-        // Filter out boilerplate/navigation
-        const cleanCandidates = textElements.filter(t => {
+        if (postContainers.length > 0) {
+          for (const pc of postContainers) {
+            const divs = Array.from(pc.querySelectorAll('div[dir="auto"], span[dir="auto"]'));
+            for (const d of divs) {
+              const txt = (d.innerText || '').trim();
+              if (txt.length > 35) candidateTexts.push(txt);
+            }
+          }
+        }
+
+        if (candidateTexts.length === 0) {
+          candidateTexts = Array.from(document.querySelectorAll('div[dir="auto"], span[dir="auto"]'))
+            .map(el => (el.innerText || '').trim())
+            .filter(t => t.length > 35);
+        }
+
+        // Filter out footer links, boilerplate, and login dialog text
+        const cleanCandidates = candidateTexts.filter(t => {
           return !t.startsWith('Log in') &&
                  !t.startsWith('See more on Facebook') &&
                  !t.startsWith('Create new account') &&
                  !t.startsWith('Forgot password') &&
                  !t.startsWith('View more comments') &&
                  !t.startsWith('Write a comment') &&
+                 !t.includes('Contact Uploading') &&
+                 !t.includes('Meta ©') &&
                  !t.includes('All reactions:') &&
                  !t.includes('Like\nComment') &&
                  !t.match(/^\d+[hmdw]$/);
         });
 
-        // Longest candidate is the author's caption
+        // Longest candidate in the post area is the true caption
         cleanCandidates.sort((a, b) => b.length - a.length);
         const caption = cleanCandidates[0] || '';
 
