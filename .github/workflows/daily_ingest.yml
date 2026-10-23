@@ -1,9 +1,9 @@
 name: Daily Facebook Ingestion (Phase 1)
 
+# Automated cron disabled on GitHub cloud runners because Meta blocks cloud datacenter IPs.
+# Ingestion runs locally via Windows Task Scheduler at 03:00 PM IST (using residential IP).
+# Manual workflow_dispatch is kept for testing if needed.
 on:
-  schedule:
-    # 09:30 AM UTC (03:00 PM IST / 05:30 AM EDT)
-    - cron: '30 9 * * *'
   workflow_dispatch:
 
 jobs:
