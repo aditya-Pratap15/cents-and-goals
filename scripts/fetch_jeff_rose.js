@@ -1,33 +1,49 @@
 #!/usr/bin/env node
 /**
- * 🕵️‍♂️ CENTS & GOALS - ULTRA-LIGHTWEIGHT INGESTION BOT (PHASE 1)
- * -------------------------------------------------------------
- * Scrapes the 5 most recent posts from Jeff Rose (Good Financial Cents):
- * Target: https://www.facebook.com/GoodFinancialCents/photos
- *
- * For each post, extracts ONLY essential fields:
- * - id: "post_01", ...
- * - image_url: Direct high-resolution Facebook CDN image URL
- * - caption: Full post caption
- * - author_comment: Author comment by handle (if present)
- *
- * Uploads a minimal, clean `captions.json` (~2 KB) to Google Drive "before"
- * subfolder via Google Apps Script Bridge.
- * (Zero local image downloads, zero Drive quota wasted).
+ * 🕵️‍♂️ CENTS & GOALS - INGESTION BOT (PHASE 1)
+ * --------------------------------------------
+ * 1. Scrapes the 5 most recent posts from Jeff Rose (Good Financial Cents) via residential IP.
+ * 2. Downloads the 5 high-res photos to `staged/post_01.jpg` ... `post_05.jpg`.
+ * 3. Commits and pushes `staged/` to GitHub so images have permanent, bot-friendly
+ *    Raw GitHub CDN URLs (zero login wall, pure JPG bytes, never blocked).
+ * 4. Generates a lean `captions.json` with only essential fields:
+ *    - id: "post_01"
+ *    - image_url: "https://raw.githubusercontent.com/aditya-Pratap15/cents-and-goals/main/staged/post_01.jpg"
+ *    - cdn_url: "https://cdn.jsdelivr.net/gh/aditya-Pratap15/cents-and-goals@main/staged/post_01.jpg"
+ *    - caption: "..."
+ *    - author_comment: "..."
+ * 5. Uploads `captions.json` to Google Drive "before" subfolder via Apps Script.
  */
 
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const { execSync } = require('child_process');
 const puppeteer = require('puppeteer');
 
 const BASE_DIR = path.resolve(__dirname, '..');
+const STAGED_DIR = path.join(BASE_DIR, 'staged');
 const DOWNLOADS_DIR = path.join(BASE_DIR, 'downloads', 'before');
 const CAPTIONS_JSON_PATH = path.join(DOWNLOADS_DIR, 'captions.json');
 const RAW_POSTS_JSON_PATH = path.join(DOWNLOADS_DIR, 'today_raw_posts.json');
 
 const APPS_SCRIPT_URL = (process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycby5sEQrjWJpgMRsSEP3utqrTMFWJgVoyLKs-CsI3hEbRNQlNae70S9hp54ophlVY4_6ng/exec').trim();
 const TARGET_PAGE_URL = 'https://www.facebook.com/GoodFinancialCents/photos';
+
+function downloadFile(url, dest) {
+  return new Promise((resolve, reject) => {
+    const file = fs.createWriteStream(dest);
+    https.get(url, res => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
+      }
+      res.pipe(file);
+      file.on('finish', () => file.close(resolve));
+    }).on('error', err => {
+      fs.unlink(dest, () => reject(err));
+    });
+  });
+}
 
 function postJsonToAppsScript(payload) {
   return new Promise((resolve, reject) => {
@@ -68,11 +84,14 @@ function postJsonToAppsScript(payload) {
 
 async function scrapeJeffRosePosts() {
   console.log('======================================================');
-  console.log('🔍 CENTS & GOALS: LIGHTWEIGHT INGESTION (JEFF ROSE)');
+  console.log('🔍 CENTS & GOALS: GITHUB RAW INGESTION (JEFF ROSE)');
   console.log('======================================================\n');
 
   if (!fs.existsSync(DOWNLOADS_DIR)) {
     fs.mkdirSync(DOWNLOADS_DIR, { recursive: true });
+  }
+  if (!fs.existsSync(STAGED_DIR)) {
+    fs.mkdirSync(STAGED_DIR, { recursive: true });
   }
 
   const browser = await puppeteer.launch({
@@ -237,16 +256,26 @@ async function scrapeJeffRosePosts() {
         continue;
       }
 
-      // Add ONLY essential fields for AI processing
+      // Download photo directly into staged/ directory
+      const stagedFilename = `post_0${i + 1}.jpg`;
+      const stagedPath = path.join(STAGED_DIR, stagedFilename);
+      console.log(`  📥 Downloading to staged/${stagedFilename}...`);
+      await downloadFile(extracted.imageUrl, stagedPath);
+
+      // GitHub Raw CDN & jsDelivr URLs (100% bot-friendly, zero block)
+      const rawGithubUrl = `https://raw.githubusercontent.com/aditya-Pratap15/cents-and-goals/main/staged/${stagedFilename}`;
+      const jsdelivrUrl = `https://cdn.jsdelivr.net/gh/aditya-Pratap15/cents-and-goals@main/staged/${stagedFilename}`;
+
       scrapedPosts.push({
         id: `post_0${i + 1}`,
-        image_url: extracted.imageUrl,
+        image_url: rawGithubUrl,
+        cdn_url: jsdelivrUrl,
         caption: extracted.caption,
         author_comment: extracted.authorComment || null
       });
 
-      console.log(`  ✅ Extracted post #${i + 1}!`);
-      console.log(`     Image URL: ${extracted.imageUrl.slice(0, 60)}...`);
+      console.log(`  ✅ Successfully staged post #${i + 1}!`);
+      console.log(`     Raw URL: ${rawGithubUrl}`);
       console.log(`     Caption snippet: "${extracted.caption.slice(0, 80).replace(/\n/g, ' ')}..."`);
       if (extracted.authorComment) {
         console.log(`     Author comment: "${extracted.authorComment.slice(0, 60)}..."`);
@@ -269,13 +298,27 @@ async function scrapeJeffRosePosts() {
     throw new Error('Failed to scrape any posts from Jeff Rose Facebook page.');
   }
 
-  // 1. Save clean manifest locally
+  // 1. Commit and push staged/ photos to GitHub
+  console.log('\n======================================================');
+  console.log('📦 PUSHING STAGED PHOTOS TO GITHUB (RAW CDN)');
+  console.log('======================================================\n');
+
+  try {
+    execSync('git add staged', { cwd: BASE_DIR, stdio: 'inherit' });
+    execSync('git commit -m "chore(stage): update daily staged photos [skip ci]"', { cwd: BASE_DIR, stdio: 'inherit' });
+    execSync('git push origin main', { cwd: BASE_DIR, stdio: 'inherit' });
+    console.log('✅ Staged photos successfully pushed to GitHub!');
+  } catch (gitErr) {
+    console.log('ℹ️ Git status note:', gitErr.message);
+  }
+
+  // 2. Save clean manifest locally
   const cleanJsonContent = JSON.stringify(scrapedPosts, null, 2) + '\n';
   fs.writeFileSync(CAPTIONS_JSON_PATH, cleanJsonContent, 'utf8');
   fs.writeFileSync(RAW_POSTS_JSON_PATH, cleanJsonContent, 'utf8');
   console.log(`\n💾 Saved clean manifest to ${CAPTIONS_JSON_PATH}`);
 
-  // 2. Upload minimal captions.json to Google Drive "before" subfolder
+  // 3. Upload minimal captions.json to Google Drive "before" subfolder
   console.log('\n======================================================');
   console.log('☁️ UPLOADING MINIMAL captions.json TO GOOGLE DRIVE ("before")');
   console.log('======================================================\n');
