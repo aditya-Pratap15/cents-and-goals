@@ -70,7 +70,8 @@ function doGet(e) {
           mimeType: fmime,
           size: f.getSize(),
           created: f.getDateCreated().toISOString(),
-          downloadUrl: "https://drive.google.com/uc?export=download&id=" + f.getId()
+          downloadUrl: "https://drive.google.com/uc?export=download&id=" + f.getId(),
+          directUrl: "https://lh3.googleusercontent.com/d/" + f.getId()
         });
       }
 
@@ -93,7 +94,8 @@ function doGet(e) {
         id: file.getId(),
         name: file.getName(),
         mimeType: file.getMimeType(),
-        base64: b64
+        base64: b64,
+        directUrl: "https://lh3.googleusercontent.com/d/" + file.getId()
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -150,10 +152,14 @@ function doPost(e) {
         var decoded = Utilities.base64Decode(item.base64);
         var blob = Utilities.newBlob(decoded, item.mimeType || "application/octet-stream", item.filename);
         var createdFile = beforeFolder.createFile(blob);
+        try {
+          createdFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {}
         uploaded.push({
           id: createdFile.getId(),
           name: createdFile.getName(),
-          size: createdFile.getSize()
+          size: createdFile.getSize(),
+          directUrl: "https://lh3.googleusercontent.com/d/" + createdFile.getId()
         });
       }
 
@@ -179,10 +185,14 @@ function doPost(e) {
         var decodedAfter = Utilities.base64Decode(itemAfter.base64);
         var blobAfter = Utilities.newBlob(decodedAfter, itemAfter.mimeType || "application/octet-stream", itemAfter.filename);
         var createdFileAfter = afterFolder.createFile(blobAfter);
+        try {
+          createdFileAfter.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+        } catch (shareErr) {}
         uploadedAfter.push({
           id: createdFileAfter.getId(),
           name: createdFileAfter.getName(),
-          size: createdFileAfter.getSize()
+          size: createdFileAfter.getSize(),
+          directUrl: "https://lh3.googleusercontent.com/d/" + createdFileAfter.getId()
         });
       }
 

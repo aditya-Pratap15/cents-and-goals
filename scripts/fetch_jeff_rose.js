@@ -282,6 +282,8 @@ async function scrapeJeffRosePosts() {
         source_url: photoUrl,
         filename: filename,
         local_path: `downloads/before/${filename}`,
+        public_image_url: details.imageUrl,
+        raw_cdn_url: details.imageUrl,
         caption: details.caption,
         author_comment: details.authorComment,
         timestamp: details.timeText,
@@ -322,14 +324,14 @@ async function scrapeJeffRosePosts() {
   console.log('☁️ UPLOADING RAW ASSETS TO GOOGLE DRIVE ("before")');
   console.log('======================================================\n');
 
-  const filesPayload = [];
+  const photoPayload = [];
 
   // 1. Add all downloaded JPG photos as base64
   for (const post of scrapedPosts) {
     const filePath = path.join(BASE_DIR, post.local_path);
     if (fs.existsSync(filePath)) {
       const b64 = fs.readFileSync(filePath).toString('base64');
-      filesPayload.push({
+      photoPayload.push({
         filename: post.filename,
         mimeType: 'image/jpeg',
         base64: b64
@@ -337,29 +339,55 @@ async function scrapeJeffRosePosts() {
     }
   }
 
-  // 2. Add captions.json as base64
-  const jsonContent = JSON.stringify(scrapedPosts, null, 2);
-  const jsonB64 = Buffer.from(jsonContent, 'utf8').toString('base64');
-  filesPayload.push({
-    filename: 'captions.json',
-    mimeType: 'application/json',
-    base64: jsonB64
-  });
-
-  console.log(`📤 Sending ${filesPayload.length} files to Google Apps Script bridge...`);
+  console.log(`📤 Uploading ${photoPayload.length} photos to Google Drive "before" subfolder...`);
   const uploadRes = await postJsonToAppsScript({
     action: 'upload_before',
     clearFirst: true,
-    files: filesPayload
+    files: photoPayload
   });
 
   if (uploadRes && uploadRes.success) {
-    console.log(`✅ SUCCESS! Uploaded ${uploadRes.uploadedCount} files to Google Drive "before" subfolder!`);
+    console.log(`✅ Uploaded ${uploadRes.uploadedCount} photos successfully!`);
+    
+    // Map Google Drive file IDs and high-speed CDN URLs (lh3.googleusercontent.com/d/)
+    if (Array.isArray(uploadRes.files)) {
+      for (const post of scrapedPosts) {
+        const match = uploadRes.files.find(f => f.name === post.filename);
+        if (match) {
+          post.drive_file_id = match.id;
+          post.drive_direct_url = match.directUrl || `https://lh3.googleusercontent.com/d/${match.id}`;
+        }
+      }
+    }
   } else {
-    console.error('❌ Failed uploading to Google Drive:', uploadRes);
+    console.error('❌ Failed uploading photos to Google Drive:', uploadRes);
   }
 
-  console.log('\n🎉 Phase 1 (Ingestion) Complete! Ready for Gemini Scheduler Agent.\n');
+  // 2. Save enriched manifest locally and upload captions.json to Drive
+  fs.writeFileSync(RAW_POSTS_JSON_PATH, JSON.stringify(scrapedPosts, null, 2) + '\n', 'utf8');
+  console.log(`💾 Updated local manifest with direct CDN URLs at ${RAW_POSTS_JSON_PATH}`);
+
+  const jsonContent = JSON.stringify(scrapedPosts, null, 2);
+  const jsonB64 = Buffer.from(jsonContent, 'utf8').toString('base64');
+
+  console.log(`📤 Uploading captions.json with public & direct URLs to Google Drive...`);
+  const jsonUploadRes = await postJsonToAppsScript({
+    action: 'upload_before',
+    clearFirst: false,
+    files: [{
+      filename: 'captions.json',
+      mimeType: 'application/json',
+      base64: jsonB64
+    }]
+  });
+
+  if (jsonUploadRes && jsonUploadRes.success) {
+    console.log(`✅ SUCCESS! captions.json is now live in Google Drive "before" subfolder!`);
+  } else {
+    console.error('❌ Failed uploading captions.json:', jsonUploadRes);
+  }
+
+  console.log('\n🎉 Phase 1 (Ingestion) Complete! Ready for Gemini / Meta AI Scheduler Agent.\n');
 }
 
 if (require.main === module) {
