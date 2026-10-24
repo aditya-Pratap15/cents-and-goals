@@ -1,0 +1,51 @@
+{
+  "scheduledAt": "2026-10-24T07:53:13.109Z",
+  "scheduledCount": 5,
+  "posts": [
+    {
+      "index": 1,
+      "fbPhotoId": "122108708391509173",
+      "fbPostId": null,
+      "scheduledUnix": 1792845300,
+      "scheduledTimeUTC": "Sat, 24 Oct 2026 12:35:00 GMT",
+      "authorComment": "My favorite is when a website tells me my password is incorrect, so I try to reset it, and then it tells me I can't use my old password. APPARENTLY I HAD IT RIGHT THE FIRST TIME. 😂🤦‍♂️",
+      "captionSnippet": "I grew up in a world where knowing your mother's maiden name was enough to prove..."
+    },
+    {
+      "index": 2,
+      "fbPhotoId": "122108708451509173",
+      "fbPostId": null,
+      "scheduledUnix": 1792856100,
+      "scheduledTimeUTC": "Sat, 24 Oct 2026 15:35:00 GMT",
+      "authorComment": "We should normalize taking a six-month sabbatical every 10 years. The only minor detail we need to figure out is who's going to pay the mortgage while we're sitting on the couch watching Netflix. 🤷‍♂️🏠",
+      "captionSnippet": "I think everybody who's worked long enough has fantasized about quitting their j..."
+    },
+    {
+      "index": 3,
+      "fbPhotoId": "122108708523509173",
+      "fbPostId": null,
+      "scheduledUnix": 1792863300,
+      "scheduledTimeUTC": "Sat, 24 Oct 2026 17:35:00 GMT",
+      "authorComment": "Since when did buying lunch require opening an app, accepting terms of service, and tracking digital coupons? If I wanted to do homework before eating a cheeseburger, I would have stayed in school. 🍔📉",
+      "captionSnippet": "I love how I can spend $18 at McDonald’s eating out of a paper bag or spend a si..."
+    },
+    {
+      "index": 4,
+      "fbPhotoId": "122108708601509173",
+      "fbPostId": null,
+      "scheduledUnix": 1792874100,
+      "scheduledTimeUTC": "Sat, 24 Oct 2026 20:35:00 GMT",
+      "authorComment": "I'm starting to think the most financially responsible thing you can do on a Saturday is stay home, eat leftovers, and pretend your car doesn't have any gas in it. 🚗💸",
+      "captionSnippet": "I swear, you can't leave the house anymore without somehow spending $100, and ha..."
+    },
+    {
+      "index": 5,
+      "fbPhotoId": "122108708859509173",
+      "fbPostId": null,
+      "scheduledUnix": 1792884900,
+      "scheduledTimeUTC": "Sat, 24 Oct 2026 23:35:00 GMT",
+      "authorComment": "Cutting off someone who abuses you is protecting yourself. Cutting off someone who simply disagrees with you is ego. It's always worth being honest with yourself about which one you're actually doing. 🤝",
+      "captionSnippet": "Political differences are now one of the top reasons Americans give for cutting ..."
+    }
+  ]
+}
