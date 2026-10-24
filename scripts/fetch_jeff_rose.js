@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 /**
- * 🕵️‍♂️ CENTS & GOALS - INGESTION BOT (PHASE 1)
- * --------------------------------------------
- * Scrapes the 5 most recent photo posts from Jeff Rose (Good Financial Cents):
+ * 🕵️‍♂️ CENTS & GOALS - ULTRA-LIGHTWEIGHT INGESTION BOT (PHASE 1)
+ * -------------------------------------------------------------
+ * Scrapes the 5 most recent posts from Jeff Rose (Good Financial Cents):
  * Target: https://www.facebook.com/GoodFinancialCents/photos
  *
- * For each post, extracts:
- * 1. High-resolution photo (.jpg)
- * 2. Full post caption
- * 3. Author comment by handle (if present)
- * 4. Timestamp & permalink
+ * For each post, extracts ONLY essential fields:
+ * - id: "post_01", ...
+ * - image_url: Direct high-resolution Facebook CDN image URL
+ * - caption: Full post caption
+ * - author_comment: Author comment by handle (if present)
  *
- * Uploads all 5 photos + today_raw_posts.json to Google Drive "before" subfolder
- * via Google Apps Script Bridge.
+ * Uploads a minimal, clean `captions.json` (~2 KB) to Google Drive "before"
+ * subfolder via Google Apps Script Bridge.
+ * (Zero local image downloads, zero Drive quota wasted).
  */
 
 const fs = require('fs');
@@ -22,25 +23,11 @@ const puppeteer = require('puppeteer');
 
 const BASE_DIR = path.resolve(__dirname, '..');
 const DOWNLOADS_DIR = path.join(BASE_DIR, 'downloads', 'before');
+const CAPTIONS_JSON_PATH = path.join(DOWNLOADS_DIR, 'captions.json');
 const RAW_POSTS_JSON_PATH = path.join(DOWNLOADS_DIR, 'today_raw_posts.json');
 
 const APPS_SCRIPT_URL = (process.env.APPS_SCRIPT_URL || 'https://script.google.com/macros/s/AKfycby5sEQrjWJpgMRsSEP3utqrTMFWJgVoyLKs-CsI3hEbRNQlNae70S9hp54ophlVY4_6ng/exec').trim();
 const TARGET_PAGE_URL = 'https://www.facebook.com/GoodFinancialCents/photos';
-
-function downloadFile(url, dest) {
-  return new Promise((resolve, reject) => {
-    const file = fs.createWriteStream(dest);
-    https.get(url, res => {
-      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-        return downloadFile(res.headers.location, dest).then(resolve).catch(reject);
-      }
-      res.pipe(file);
-      file.on('finish', () => file.close(resolve));
-    }).on('error', err => {
-      fs.unlink(dest, () => reject(err));
-    });
-  });
-}
 
 function postJsonToAppsScript(payload) {
   return new Promise((resolve, reject) => {
@@ -79,19 +66,9 @@ function postJsonToAppsScript(payload) {
   });
 }
 
-function slugify(text) {
-  if (!text) return 'post';
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s-]/g, '')
-    .trim()
-    .replace(/\s+/g, '_')
-    .slice(0, 30);
-}
-
 async function scrapeJeffRosePosts() {
   console.log('======================================================');
-  console.log('🔍 CENTS & GOALS: FETCHING 5 RECENT POSTS (JEFF ROSE)');
+  console.log('🔍 CENTS & GOALS: LIGHTWEIGHT INGESTION (JEFF ROSE)');
   console.log('======================================================\n');
 
   if (!fs.existsSync(DOWNLOADS_DIR)) {
@@ -118,11 +95,11 @@ async function scrapeJeffRosePosts() {
   console.log(`🌐 Navigating to ${TARGET_PAGE_URL}...`);
   await page.goto(TARGET_PAGE_URL, { waitUntil: 'networkidle2', timeout: 45000 });
 
-  // Scroll gently to load the latest chronological photos
+  // Scroll gently to load recent chronological photos
   await page.evaluate(() => window.scrollBy(0, 800));
   await new Promise(r => setTimeout(r, 2000));
 
-  // Extract distinct photo cards directly from /photos grid
+  // Extract distinct photo cards from grid
   const rawCards = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('a[href*="fbid="]'))
       .map(a => {
@@ -148,27 +125,24 @@ async function scrapeJeffRosePosts() {
   console.log(`📸 Identified ${distinctCards.length} photo cards on grid. Selecting top 5...`);
   const targetCards = distinctCards.slice(0, 5);
 
-  if (targetCards.length === 0) {
-    throw new Error('No photo permalinks found on target Facebook page.');
-  }
-
   const scrapedPosts = [];
 
   for (let i = 0; i < targetCards.length; i++) {
     const card = targetCards[i];
     const photoUrl = `https://www.facebook.com/photo/?fbid=${card.fbid}`;
     console.log(`\n------------------------------------------------------`);
-    console.log(`[#${i + 1}/5] Scraping post: ${photoUrl}`);
+    console.log(`[#${i + 1}/${targetCards.length}] Extracting post: ${photoUrl}`);
 
-    const photoPage = await browser.newPage();
-    await photoPage.setViewport({ width: 1440, height: 2200 });
-    await photoPage.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-    );
-
+    let photoPage = null;
     try {
+      photoPage = await browser.newPage();
+      await photoPage.setViewport({ width: 1440, height: 2200 });
+      await photoPage.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      );
+
       await photoPage.goto(photoUrl, { waitUntil: 'networkidle2', timeout: 35000 });
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 1500));
 
       // Dismiss login popup if present
       try {
@@ -189,13 +163,13 @@ async function scrapeJeffRosePosts() {
             }
           }
         });
-        await new Promise(r => setTimeout(r, 1200));
+        await new Promise(r => setTimeout(r, 1000));
       } catch (e) {}
 
       // Wait for high-res images to render in theater
       await photoPage.waitForSelector('img[src*="scontent"], img[src*="fbcdn"]', { timeout: 4000 }).catch(() => {});
 
-      // Extract high-res image, complete expanded caption, and author comment directly from the photo theater
+      // Extract high-res image, complete expanded caption, and author comment
       const extracted = await photoPage.evaluate((fallbackUrl) => {
         // 1. High-Res Image (Filter for main full-size photo in theater)
         const imgs = Array.from(document.querySelectorAll('img'))
@@ -251,53 +225,35 @@ async function scrapeJeffRosePosts() {
         let caption = textNodes[0] || '';
         caption = caption.replace(/\s*See less$/i, '').trim();
 
-        const timeEl = document.querySelector('abbr, a[role="link"] span');
-        const timeText = timeEl ? timeEl.innerText.trim() : 'Recent';
-
         return {
           imageUrl: bestImg,
           caption: caption,
-          authorComment: authorComment,
-          timeText: timeText
+          authorComment: authorComment
         };
       }, card.gridImg);
 
-      const details = extracted;
-
-      if (!details.imageUrl) {
+      if (!extracted.imageUrl) {
         console.warn(`  ⚠️ Could not find high-res image for post #${i + 1}, skipping.`);
         continue;
       }
 
-      const postSlug = slugify(details.caption.slice(0, 40)) || 'photo';
-      const filename = `post_0${i + 1}_${postSlug}.jpg`;
-      const localFilePath = path.join(DOWNLOADS_DIR, filename);
-
-      console.log(`  📥 Downloading image to ${filename}...`);
-      await downloadFile(details.imageUrl, localFilePath);
-
+      // Add ONLY essential fields for AI processing
       scrapedPosts.push({
-        index: i + 1,
         id: `post_0${i + 1}`,
-        source_url: photoUrl,
-        filename: filename,
-        local_path: `downloads/before/${filename}`,
-        public_image_url: details.imageUrl,
-        raw_cdn_url: details.imageUrl,
-        caption: details.caption,
-        author_comment: details.authorComment,
-        timestamp: details.timeText,
-        extracted_at: new Date().toISOString()
+        image_url: extracted.imageUrl,
+        caption: extracted.caption,
+        author_comment: extracted.authorComment || null
       });
 
-      console.log(`  ✅ Successfully scraped post #${i + 1}!`);
-      console.log(`     Caption snippet: "${details.caption.slice(0, 80).replace(/\n/g, ' ')}..."`);
-      if (details.authorComment) {
-        console.log(`     Author comment: "${details.authorComment.slice(0, 60)}..."`);
+      console.log(`  ✅ Extracted post #${i + 1}!`);
+      console.log(`     Image URL: ${extracted.imageUrl.slice(0, 60)}...`);
+      console.log(`     Caption snippet: "${extracted.caption.slice(0, 80).replace(/\n/g, ' ')}..."`);
+      if (extracted.authorComment) {
+        console.log(`     Author comment: "${extracted.authorComment.slice(0, 60)}..."`);
       }
 
     } catch (err) {
-      console.error(`  ❌ Failed scraping post #${i + 1}:`, err.message);
+      console.error(`  ❌ Failed extracting post #${i + 1}:`, err.message);
     } finally {
       if (photoPage && !photoPage.isClosed()) {
         await photoPage.close().catch(() => {});
@@ -313,67 +269,23 @@ async function scrapeJeffRosePosts() {
     throw new Error('Failed to scrape any posts from Jeff Rose Facebook page.');
   }
 
-  // Save unified metadata JSON locally
-  fs.writeFileSync(RAW_POSTS_JSON_PATH, JSON.stringify(scrapedPosts, null, 2) + '\n', 'utf8');
-  console.log(`\n💾 Saved local manifest to ${RAW_POSTS_JSON_PATH}`);
+  // 1. Save clean manifest locally
+  const cleanJsonContent = JSON.stringify(scrapedPosts, null, 2) + '\n';
+  fs.writeFileSync(CAPTIONS_JSON_PATH, cleanJsonContent, 'utf8');
+  fs.writeFileSync(RAW_POSTS_JSON_PATH, cleanJsonContent, 'utf8');
+  console.log(`\n💾 Saved clean manifest to ${CAPTIONS_JSON_PATH}`);
 
-  // -------------------------------------------------------------
-  // Push to Google Drive "before" Subfolder via Apps Script
-  // -------------------------------------------------------------
+  // 2. Upload minimal captions.json to Google Drive "before" subfolder
   console.log('\n======================================================');
-  console.log('☁️ UPLOADING RAW ASSETS TO GOOGLE DRIVE ("before")');
+  console.log('☁️ UPLOADING MINIMAL captions.json TO GOOGLE DRIVE ("before")');
   console.log('======================================================\n');
 
-  const photoPayload = [];
+  const jsonB64 = Buffer.from(cleanJsonContent, 'utf8').toString('base64');
+  console.log(`📤 Sending captions.json (${Buffer.byteLength(cleanJsonContent)} bytes) to Apps Script bridge...`);
 
-  // 1. Add all downloaded JPG photos as base64
-  for (const post of scrapedPosts) {
-    const filePath = path.join(BASE_DIR, post.local_path);
-    if (fs.existsSync(filePath)) {
-      const b64 = fs.readFileSync(filePath).toString('base64');
-      photoPayload.push({
-        filename: post.filename,
-        mimeType: 'image/jpeg',
-        base64: b64
-      });
-    }
-  }
-
-  console.log(`📤 Uploading ${photoPayload.length} photos to Google Drive "before" subfolder...`);
   const uploadRes = await postJsonToAppsScript({
     action: 'upload_before',
     clearFirst: true,
-    files: photoPayload
-  });
-
-  if (uploadRes && uploadRes.success) {
-    console.log(`✅ Uploaded ${uploadRes.uploadedCount} photos successfully!`);
-    
-    // Map Google Drive file IDs and high-speed CDN URLs (lh3.googleusercontent.com/d/)
-    if (Array.isArray(uploadRes.files)) {
-      for (const post of scrapedPosts) {
-        const match = uploadRes.files.find(f => f.name === post.filename);
-        if (match) {
-          post.drive_file_id = match.id;
-          post.drive_direct_url = match.directUrl || `https://lh3.googleusercontent.com/d/${match.id}`;
-        }
-      }
-    }
-  } else {
-    console.error('❌ Failed uploading photos to Google Drive:', uploadRes);
-  }
-
-  // 2. Save enriched manifest locally and upload captions.json to Drive
-  fs.writeFileSync(RAW_POSTS_JSON_PATH, JSON.stringify(scrapedPosts, null, 2) + '\n', 'utf8');
-  console.log(`💾 Updated local manifest with direct CDN URLs at ${RAW_POSTS_JSON_PATH}`);
-
-  const jsonContent = JSON.stringify(scrapedPosts, null, 2);
-  const jsonB64 = Buffer.from(jsonContent, 'utf8').toString('base64');
-
-  console.log(`📤 Uploading captions.json with public & direct URLs to Google Drive...`);
-  const jsonUploadRes = await postJsonToAppsScript({
-    action: 'upload_before',
-    clearFirst: false,
     files: [{
       filename: 'captions.json',
       mimeType: 'application/json',
@@ -381,10 +293,10 @@ async function scrapeJeffRosePosts() {
     }]
   });
 
-  if (jsonUploadRes && jsonUploadRes.success) {
+  if (uploadRes && uploadRes.success) {
     console.log(`✅ SUCCESS! captions.json is now live in Google Drive "before" subfolder!`);
   } else {
-    console.error('❌ Failed uploading captions.json:', jsonUploadRes);
+    console.error('❌ Failed uploading captions.json to Google Drive:', uploadRes);
   }
 
   console.log('\n🎉 Phase 1 (Ingestion) Complete! Ready for Gemini / Meta AI Scheduler Agent.\n');

@@ -269,7 +269,7 @@ async function runScheduler() {
         fbPostId: fbRes.post_id || null,
         scheduledUnix: scheduleUnix,
         scheduledTimeUTC: scheduleDateStr,
-        authorComment: post.authorComment || null,
+        authorComment: post.authorComment || post.author_comment || null,
         captionSnippet: finalCaption.slice(0, 80) + '...'
       });
     } catch (err) {
