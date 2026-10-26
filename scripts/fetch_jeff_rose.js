@@ -115,8 +115,10 @@ async function scrapeJeffRosePosts() {
   await page.goto(TARGET_PAGE_URL, { waitUntil: 'networkidle2', timeout: 45000 });
 
   // Scroll gently to load recent chronological photos
-  await page.evaluate(() => window.scrollBy(0, 800));
+  await page.evaluate(() => window.scrollBy(0, 1000));
   await new Promise(r => setTimeout(r, 2000));
+  await page.evaluate(() => window.scrollBy(0, 1000));
+  await new Promise(r => setTimeout(r, 1500));
 
   // Extract distinct photo cards from grid
   const rawCards = await page.evaluate(() => {
@@ -141,16 +143,15 @@ async function scrapeJeffRosePosts() {
     }
   }
 
-  console.log(`📸 Identified ${distinctCards.length} photo cards on grid. Selecting top 5...`);
-  const targetCards = distinctCards.slice(0, 5);
+  console.log(`📸 Identified ${distinctCards.length} photo cards on grid. Scanning for 5 valid substantive posts (ignoring profile pictures & banners)...`);
 
   const scrapedPosts = [];
 
-  for (let i = 0; i < targetCards.length; i++) {
-    const card = targetCards[i];
+  for (let i = 0; i < distinctCards.length && scrapedPosts.length < 5; i++) {
+    const card = distinctCards[i];
     const photoUrl = `https://www.facebook.com/photo/?fbid=${card.fbid}`;
     console.log(`\n------------------------------------------------------`);
-    console.log(`[#${i + 1}/${targetCards.length}] Extracting post: ${photoUrl}`);
+    console.log(`[Scanning Grid #${i + 1}/${distinctCards.length} | Accepted: ${scrapedPosts.length}/5] Evaluating: ${photoUrl}`);
 
     let photoPage = null;
     try {
@@ -190,6 +191,15 @@ async function scrapeJeffRosePosts() {
 
       // Extract high-res image, complete expanded caption, and author comment
       const extracted = await photoPage.evaluate((fallbackUrl) => {
+        const bodyText = (document.body ? document.body.innerText || '' : '').toLowerCase();
+        const isProfileOrCover = 
+          bodyText.includes('profile pictures') ||
+          bodyText.includes('cover photos') ||
+          bodyText.includes('updated their profile picture') ||
+          bodyText.includes('updated his profile picture') ||
+          bodyText.includes('updated their cover photo') ||
+          bodyText.includes('updated his cover photo');
+
         // 1. High-Res Image (Filter for main full-size photo in theater)
         const imgs = Array.from(document.querySelectorAll('img'))
           .map(img => ({
@@ -239,6 +249,10 @@ async function scrapeJeffRosePosts() {
                        !t.startsWith('Create new account') &&
                        !t.startsWith('Email address') &&
                        !t.startsWith('Forgotten account') &&
+                       !t.toLowerCase().includes('updated their profile picture') &&
+                       !t.toLowerCase().includes('updated his profile picture') &&
+                       !t.toLowerCase().includes('updated their cover photo') &&
+                       !t.toLowerCase().includes('updated his cover photo') &&
                        t !== authorComment);
 
         let caption = textNodes[0] || '';
@@ -247,19 +261,40 @@ async function scrapeJeffRosePosts() {
         return {
           imageUrl: bestImg,
           caption: caption,
-          authorComment: authorComment
+          authorComment: authorComment,
+          isProfileOrCover: isProfileOrCover
         };
       }, card.gridImg);
 
       if (!extracted.imageUrl) {
-        console.warn(`  ⚠️ Could not find high-res image for post #${i + 1}, skipping.`);
+        console.warn(`  ⚠️ Could not find high-res image for grid item #${i + 1}, skipping.`);
         continue;
       }
 
-      // Download photo directly into staged/ directory
-      const stagedFilename = `post_0${i + 1}.jpg`;
+      const captionText = (extracted.caption || '').trim();
+      const lowerCaption = captionText.toLowerCase();
+
+      // Guard: Reject empty or short captions (profile pics, banners, logo uploads)
+      if (!captionText || captionText.length < 40) {
+        console.warn(`  🚫 REJECTED item #${i + 1}: Caption is empty or too short (${captionText.length} chars). Profile picture or banner detected.`);
+        continue;
+      }
+
+      // Guard: Explicit profile / cover indicator detected
+      if (extracted.isProfileOrCover || 
+          lowerCaption.includes('profile picture') || 
+          lowerCaption.includes('cover photo') ||
+          lowerCaption.includes('updated their profile') ||
+          lowerCaption.includes('updated their cover')) {
+        console.warn(`  🚫 REJECTED item #${i + 1}: Profile picture or cover photo indicator detected. Skipping.`);
+        continue;
+      }
+
+      // Valid finance post accepted!
+      const postNumber = scrapedPosts.length + 1;
+      const stagedFilename = `post_0${postNumber}.jpg`;
       const stagedPath = path.join(STAGED_DIR, stagedFilename);
-      console.log(`  📥 Downloading to staged/${stagedFilename}...`);
+      console.log(`  📥 Downloading valid post #${postNumber} to staged/${stagedFilename}...`);
       await downloadFile(extracted.imageUrl, stagedPath);
 
       // GitHub Raw CDN & jsDelivr URLs (100% bot-friendly, zero block)
@@ -267,14 +302,14 @@ async function scrapeJeffRosePosts() {
       const jsdelivrUrl = `https://cdn.jsdelivr.net/gh/aditya-Pratap15/cents-and-goals@main/staged/${stagedFilename}`;
 
       scrapedPosts.push({
-        id: `post_0${i + 1}`,
+        id: `post_0${postNumber}`,
         image_url: rawGithubUrl,
         cdn_url: jsdelivrUrl,
         caption: extracted.caption,
         author_comment: extracted.authorComment || null
       });
 
-      console.log(`  ✅ Successfully staged post #${i + 1}!`);
+      console.log(`  ✅ Successfully accepted post #${postNumber}!`);
       console.log(`     Raw URL: ${rawGithubUrl}`);
       console.log(`     Caption snippet: "${extracted.caption.slice(0, 80).replace(/\n/g, ' ')}..."`);
       if (extracted.authorComment) {
@@ -282,7 +317,7 @@ async function scrapeJeffRosePosts() {
       }
 
     } catch (err) {
-      console.error(`  ❌ Failed extracting post #${i + 1}:`, err.message);
+      console.error(`  ❌ Failed extracting grid item #${i + 1}:`, err.message);
     } finally {
       if (photoPage && !photoPage.isClosed()) {
         await photoPage.close().catch(() => {});
